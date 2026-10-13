@@ -24,7 +24,7 @@ const KEYS = {
   gcp_project_id: { pattern: /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/, hint: "GCP project ID" },
   gcp_region: { pattern: /./, hint: "GCP region, e.g. us-east5 or global" },
   google_client_id: { pattern: /\.apps\.googleusercontent\.com$/, hint: "OAuth 2.0 client ID" },
-  google_client_secret: { pattern: /^GOCSPX-/, hint: "OAuth 2.0 client secret" },
+  google_client_secret: { pattern: /^GOCSPX-/, hint: "OAuth 2.0 client secret", secret: true },
   aws_role_arn: {
     pattern: /^arn:aws:iam::\d{12}:role\//,
     hint: "e.g. arn:aws:iam::123456789012:role/ClaudeBedrockAccess",
@@ -37,6 +37,7 @@ const KEYS = {
   azure_api_key: {
     pattern: /^[A-Za-z0-9]{20,}$/,
     hint: "From Azure Portal → your Foundry resource → Keys and Endpoint → KEY 1",
+    secret: true,
   },
   graph_client_id: {
     pattern: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
@@ -92,13 +93,13 @@ async function main() {
   const params = new URLSearchParams();
   for (const p of pairs) {
     const eq = p.indexOf("=");
-    if (eq < 1) throw new Error(`bad arg: ${p} (expected key=value)`);
+    if (eq < 1) throw new Error("bad arg (expected key=value; values omitted for safety)");
     const [k, v] = [p.slice(0, eq).trim(), p.slice(eq + 1).trim()];
 
     const spec = KEYS[k];
-    if (!spec) throw new Error(`unknown key: ${k}\n  valid: ${Object.keys(KEYS).join(", ")}`);
+    if (!spec) throw new Error(`unknown key\n  valid: ${Object.keys(KEYS).join(", ")}`);
     if (!v) throw new Error(`empty value for ${k}`);
-    if (!spec.pattern.test(v)) console.warn(`warn: ${k}=${v} — expected ${spec.hint}`);
+    if (!spec.pattern.test(v)) console.warn(`warn: ${k} — expected ${spec.hint} (value omitted)`);
     if (spec.secret) {
       console.warn(
         `note: ${k} in the manifest applies to every user. If it varies per user, set it via update-user-attrs instead.`,
@@ -119,7 +120,7 @@ async function main() {
   const qs = params.toString().replaceAll("&", "&amp;");
 
   const res = await fetch(manifestUrl);
-  if (!res.ok) throw new Error(`fetch ${manifestUrl}: ${res.status} ${res.statusText}`);
+  if (!res.ok) throw new Error(`fetch manifest: HTTP ${res.status}`);
   let xml = await res.text();
 
   for (const slot of URL_SLOTS) {
@@ -131,7 +132,7 @@ async function main() {
   }
 
   writeFileSync(out, xml);
-  console.log(`Wrote ${out} (${host}, params: ${params})`);
+  console.log(`Wrote ${out} (${host}, keys: ${[...params.keys()].join(", ")})`);
 }
 
 main().catch((err) => {

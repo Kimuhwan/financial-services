@@ -23,7 +23,10 @@ def b64u(n: int) -> str:
 
 if not os.path.exists(PRIV):
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    with open(PRIV, "wb") as f:
+    # Do not rely on the caller's umask: this key can mint any dev identity.
+    # Exclusive creation also refuses a file/symlink placed after the check.
+    fd = os.open(PRIV, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "wb") as f:
         f.write(key.private_bytes(
             serialization.Encoding.PEM,
             serialization.PrivateFormat.PKCS8,

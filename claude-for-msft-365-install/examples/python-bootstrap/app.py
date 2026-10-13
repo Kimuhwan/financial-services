@@ -22,7 +22,7 @@ from config import (
     RULES,
     SKILLS,
 )
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from jwt import PyJWKClient
 
@@ -54,16 +54,25 @@ def validate(auth_header: str) -> dict:
     if not auth_header or not auth_header.startswith("Bearer "):
         raise HTTPException(401, "Missing bearer token")
     token = auth_header.removeprefix("Bearer ").strip()
-    if DEV_JWKS_PATH:
-        import json
-        with open(DEV_JWKS_PATH) as f:
-            key = jwt.PyJWK(json.load(f)["keys"][0]).key
-    else:
-        key = _jwks.get_signing_key_from_jwt(token).key
     try:
-        return jwt.decode(token, key, algorithms=["RS256"], audience=AUDIENCE, issuer=ISSUER)
-    except jwt.InvalidTokenError as e:
-        raise HTTPException(401, f"Invalid token: {e}")
+        if DEV_JWKS_PATH:
+            import json
+            with open(DEV_JWKS_PATH) as f:
+                key = jwt.PyJWK(json.load(f)["keys"][0]).key
+        else:
+            key = _jwks.get_signing_key_from_jwt(token).key
+        claims = jwt.decode(
+            token, key, algorithms=["RS256"], audience=AUDIENCE, issuer=ISSUER,
+            options={"require": ["exp", "aud", "iss", "oid"]},
+        )
+        if not isinstance(claims["oid"], str) or not claims["oid"].strip():
+            raise jwt.InvalidTokenError("Invalid user identity")
+        groups = claims.get("groups", [])
+        if not isinstance(groups, list) or any(not isinstance(g, str) for g in groups):
+            raise jwt.InvalidTokenError("Invalid group membership")
+        return claims
+    except (jwt.InvalidTokenError, jwt.PyJWKClientError) as e:
+        raise HTTPException(401, "Invalid bearer token") from e
 
 # ─── HTTP ────────────────────────────────────────────────────────────
 app = FastAPI()
@@ -76,10 +85,13 @@ app.add_middleware(
 
 @app.get("/bootstrap")
 def bootstrap(
+    response: Response,
     authorization: str = Header(None),
     x_claude_user_agent: str = Header(None),
 ):
     claims = validate(authorization)
+    # Responses may contain per-user credentials or signed skill-download URLs.
+    response.headers["Cache-Control"] = "no-store"
     oid = claims.get("oid", "")
     # NOTE: We assume group membership arrives in the token's `groups` claim.
     # If your tenant doesn't emit it (or you prefer your own RBAC), replace
